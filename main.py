@@ -72,6 +72,7 @@ async def main():
     test_db_name = str(os.getenv("TEST_DATABASE_NAME"))
     history_collection_name = str(os.getenv("HISTORY_COLLECTION_NAME"))
     history_result_collection_name = str(os.getenv("HISTORY_RESULT_COLLECTION_NAME"))
+    aml_ongoing_monitoring_collection_name = str(os.getenv("AML_ONGOING_MONITORING_COLLECTION_NAME"))
     
     # Get data from AML_history by filter ongoing_monitoring = true
     history_data = await fetch(client, test_db_name, history_collection_name, {"ongoing_monitoring": True})
@@ -90,11 +91,16 @@ async def main():
                                     history))
         
     results = await asyncio.gather(*tasks)
-    status_update_lists = [result[1] for result in results]
+    status_update_lists = [result[1] for result in results if result[0]['data']]
     status_update_ids = [item for sublist in status_update_lists for item in sublist]
     
     # Update status of changelogs to pending
-    await client[source_db_name][sourcedata_changelogs_collection_name].update_many({"_id": {"$in": status_update_ids}}, {"$set": {"status": "pending"}})
+    await client[source_db_name][sourcedata_changelogs_collection_name].update_many({"_id": {"$in": status_update_ids}}, {"$set": {"status": "completed"}})
+    
+    # Create ongoing monitoring record 
+    for result in results:
+        if result[0]['data']:
+            await client[test_db_name][aml_ongoing_monitoring_collection_name].insert_one(result[0])
     
     # Close connection
     await client.close()
