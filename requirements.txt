@@ -1,4 +1,5 @@
 asyncio
 pymongo
 python-dotenv
-rapidfuzz
+rapidfuzz   
+aiofiles    

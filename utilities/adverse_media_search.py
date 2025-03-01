@@ -7,6 +7,9 @@ from utilities.text_similarity import get_similarities
 
 async def get_adverse_media(collection, name: str) -> List[Dict]:
     
+    if not name:
+        return []
+    
     # Preprocess search name
     normalized_search_name = name.lower().strip()
     print(f'Original search name: {name}')
@@ -40,15 +43,16 @@ async def get_adverse_media(collection, name: str) -> List[Dict]:
         # Restore document structure
         {"$replaceRoot": {"newRoot": "$doc"}}
     ]
-
-    print(f'Aggregation pipeline: {json.dumps(pipeline, indent=2)}')
     
-    candidates = await collection.aggregate(pipeline).to_list(None)
-    print(f'Found {len(candidates)} candidate records')
-
-    # Filter using string similarity
+    cursor = await collection.aggregate(pipeline)
+    
     result = []
-    for item in candidates:
+    
+    print(f"Starting cursor iteration for name: {name}")
+    count = 0
+    async for item in cursor:
+        count += 1
+        print(f"Processing item #{count}")
         print(f'Checking item: {json.dumps(item.get("target"), indent=2)}')
 
         if item.get('target', {}).get('name_en'):
@@ -97,26 +101,33 @@ async def get_adverse_media(collection, name: str) -> List[Dict]:
                     result.append(item)
                     break
 
+    print(f"Processed {count} items from cursor")
     print(f'After similarity filtering: {len(result)} records')
     
     formatted_data = []
     for item in result:
+        print(f"Formatting item: {item['_id']}")
         subtitle = item['source']['title']
         if item.get('published'):
             subtitle += f" - {item['published']}"
             
-        formatted_data.append({
-            '_id': item['_id'],
+        formatted_item = {
+            '_id': str(item['_id']),
             'title': item.get('headline', {}).get('en'),
             'link': item['urls'][0] if item.get('urls') else None,
             'subtitle': subtitle,
             'description': item.get('content', {}).get('en'),
-        })
+        }
+        print(f"Formatted item: {json.dumps(formatted_item, indent=2)}")
+        formatted_data.append(formatted_item)
 
+    print(f"Final formatted data count: {len(formatted_data)}")
     return formatted_data
 
-async def handler(client: AsyncMongoClient, event: Dict[str, Any]) -> Dict[str, Any]:
-    name_to_search_arr = event.get('nameToSearchArr')
+async def handler(client: AsyncMongoClient, search_name: list[str]) -> Dict[str, Any]:
+    
+    # Array of names to search
+    name_to_search_arr = search_name
 
     try:
         db = client[os.getenv('SOURCE_DATABASE_NAME')]

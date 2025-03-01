@@ -4,13 +4,10 @@ import os
 import json
 from utilities.text_similarity import get_similarities  # You'll need an equivalent Python package
 
-if not os.environ.get('MONGODB_URI'):
-    raise ValueError('Invalid environment variable: "MONGODB_URI"')
-
-cached_client = None
-cached_db = None
-
 async def get_judgments(collection, name: str) -> List[Dict]:
+    if not name:
+        return []
+    
     # Preprocess search name
     normalized_search_name = name.lower().strip()
     print(f'Original search name: {name}')
@@ -27,14 +24,15 @@ async def get_judgments(collection, name: str) -> List[Dict]:
 
     print(f'Aggregation pipeline: {json.dumps(pipeline, indent=2)}')
     
-    candidates = await collection.aggregate(pipeline).to_list(None)
-    print(f'Found {len(candidates)} candidate records')
+    candidates = await collection.aggregate(pipeline)
+    # print(f'Found {len(candidates)} candidate records')
 
     # Filter using string similarity
     result = []
-    for item in candidates:
+    async for item in candidates:
         if isinstance(item.get('title'), str):
             lower_item_title = item['title'].lower()
+            item["_id"] = str(item["_id"])
             print('Comparing strings:', {
                 'search_name': normalized_search_name,
                 'target_name': lower_item_title
@@ -62,10 +60,10 @@ async def get_judgments(collection, name: str) -> List[Dict]:
 
     return result
 
-async def handler(client: AsyncMongoClient, event: Dict[str, Any]) -> Dict[str, Any]:
-    print(f'Received event: {json.dumps(event, indent=2)}')
+async def handler(client: AsyncMongoClient, search_name:list[str]) -> Dict[str, Any]:
+    print(f'Received search_name: {search_name}')
 
-    name_to_search_arr = event.get('nameToSearchArr')
+    name_to_search_arr = search_name
 
     if not name_to_search_arr:
         return {

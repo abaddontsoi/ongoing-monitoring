@@ -1,0 +1,35 @@
+{
+    "aml_history_id": "AML_history Objectid",
+    "searchBy": "from AML_history",
+    "status": "todo",
+    "data": [
+        {
+            "sourcedata_changelogs_id": "Objectid",
+            "data_id": "AdverseMediaID/JudgmentID (Only string)",
+            "category": "AdverseMedia",
+            "type": "MOD",
+            "changes": [
+                {
+                    "field": "content.en",
+                    "old_value": "",
+                    "new_value": ""
+                }
+            ]
+        },
+        {
+            "sourcedata_changelogs_id": "Objectid",
+            "data_id": "AdverseMediaID/JudgmentID (Only string)",
+            "category": "Judgment",
+            "type": "ADD",
+            "new_data": "object from judgmentdb"
+        },
+        {
+            "sourcedata_changelogs_id": "Objectid",
+            "data_id": "AdverseMediaID/JudgmentID (Only string)",
+            "category": "Judgment",
+            "type": "DEL"
+        }
+    ],
+    "createdAt": "new Date()",
+    "updatedAt": "new Date()"
+}

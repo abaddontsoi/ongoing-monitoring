@@ -68,8 +68,8 @@ async def get_adverse_media(db, name: str) -> List[Dict]:
 
     print(f'Aggregation pipeline: {json.dumps(pipeline, indent=2)}')
     
-    candidates = list(db.adverse_media.aggregate(pipeline))
-    print(f'Found {len(candidates)} candidate records')
+    candidates = list(await db.adverse_media.aggregate(pipeline))
+    # print(f'Found {len(candidates)} candidate records')
 
     # Filter using string similarity
     result = []

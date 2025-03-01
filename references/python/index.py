@@ -51,8 +51,8 @@ async def get_judgments(db, name: str) -> List[Dict]:
 
     print(f'Aggregation pipeline: {json.dumps(pipeline, indent=2)}')
     
-    candidates = list(db.judgment.aggregate(pipeline))
-    print(f'Found {len(candidates)} candidate records')
+    candidates = list(await db.judgment.aggregate(pipeline))
+    # print(f'Found {len(candidates)} candidate records')
 
     # Filter using string similarity
     result = []
