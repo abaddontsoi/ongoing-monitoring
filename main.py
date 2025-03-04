@@ -19,22 +19,44 @@ async def cross_search_history_changelogs(history_data: list[dict], changelog_da
         # Search whether changelog's target is in history_data
         target = changelog["new_data"].get("target", [])
         if isinstance(target, list) and len(target) > 0:
-            target_en = target[0].get("name_en", "").lower()
-            target_zh = target[0].get("name_zh", "")
-            target_en_zh = target_en + " " + target_zh
             # Calculate and store the similarity between changelog's target and history_data's nameEN, nameZH, nameEN + nameZH
             for history in history_data:
+                target_en_list = [item.get("name_en", "").lower() for item in target]
+                target_zh_list = [item.get("name_zh", "") for item in target]
+                target_en_zh_list = [item.get("name_en", "") + " " + item.get("name_zh", "") for item in target]
+                
                 should_append = True
-                nameEN, nameZH = history.get("nameEN", "").lower(), history.get("nameZH", "").lower()
-                similarity_en = fuzz.ratio(target_en, nameEN)
-                should_append = should_append and similarity_en >= 0.2
-                similarity_zh = fuzz.ratio(target_zh, nameZH)
-                should_append = should_append and similarity_zh >= 0.2
-                similarity_en_zh = fuzz.ratio(target_en_zh, nameEN + " " + nameZH)
-                should_append = should_append and similarity_en_zh >= 0.2
+                nameEN, nameZH = history.get("nameEN", "").lower(), history.get("nameZH", "")
+                
+                # Check English name similarity
+                if nameEN:
+                    for target_en in target_en_list:
+                        similarity_en = fuzz.ratio(target_en, nameEN)
+                        if similarity_en >= 80:
+                            should_append = True
+                            break
+                        should_append = False
+                
+                # If English name doesn't match, check Chinese name similarity
+                if not should_append and nameZH:
+                    for target_zh in target_zh_list:
+                        similarity_zh = fuzz.ratio(target_zh, nameZH) 
+                        if similarity_zh >= 80:
+                            should_append = True
+                            break
+                        should_append = False
+                
+                # Check combined name similarity if individual matches failed
+                if not should_append:
+                    for target_en_zh in target_en_zh_list:
+                        similarity_en_zh = fuzz.ratio(target_en_zh, nameEN + " " + nameZH)
+                        if similarity_en_zh >= 80:
+                            should_append = True
+                            break
+                        should_append = False
                 
                 if should_append:
-                    similarity_cartesian_product.append((history, changelog, max(similarity_en, similarity_zh, similarity_en_zh)))
+                    similarity_cartesian_product.append((history, changelog))
                     
 
     # Sort similarity_cartesian_product by history's _id
@@ -42,7 +64,7 @@ async def cross_search_history_changelogs(history_data: list[dict], changelog_da
     
     # Group by history's _id
     grouped_similarity_cartesian_product = {}
-    for history, changelog, similarity in similarity_cartesian_product:
+    for history, changelog in similarity_cartesian_product:
         if history["_id"] not in grouped_similarity_cartesian_product:
             grouped_similarity_cartesian_product[history["_id"]] = {
                 "searchBy": history['searchBy'],
@@ -58,7 +80,13 @@ async def cross_search_history_changelogs(history_data: list[dict], changelog_da
             log['data_id'] = changelog['original_data_id']
             log['type'] = changelog['action']
             log['category'] = changelog['category']
-            log['changes'] = changelog['changes']
+            if changelog['action'] == 'ADD':
+                log['new_data'] = changelog['new_data']
+            elif changelog['action'] == 'MOD':
+                log['new_data'] = changelog['new_data']
+                if changelog['changes']:
+                    log['changes'] = changelog['changes']
+                    
             log['createdAt'] = datetime.now()
             log['updatedAt'] = datetime.now()
             changelogs.append(log)
