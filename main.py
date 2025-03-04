@@ -41,7 +41,32 @@ async def cross_search_history_changelogs(history_data: list[dict], changelog_da
                             
                 if match_name_en_list or match_name_zh_list:
                     cartesian_product.append((history, changelog))
-    
+                    
+            elif isinstance(changelog.get("new_data", {}).get("target"), dict):
+                en = changelog.get("new_data", {}).get("target", {}).get("en", {})
+                zh = changelog.get("new_data", {}).get("target", {}).get("zh", {})
+                
+                name_en_list = [item.get("ceName", "").lower() for item in en]
+                name_zh_list = [item.get("ceName", "") for item in zh]     
+                match_name_en_list = []
+                match_name_zh_list = []
+                re_en_exp = re.compile(f".*{nameEN}.*")
+                re_zh_exp = re.compile(f".*{nameZH}.*")
+                for name_en in name_en_list:
+                    print(f"Comparing {name_en} with {nameEN}")
+                    if re.search(re_en_exp, name_en) and len(name_en) > 0:
+                        if fuzz.ratio(name_en, nameEN) > 20:
+                            match_name_en_list.append(name_en)
+                        
+                for name_zh in name_zh_list:
+                    print(f"Comparing {name_zh} with {nameZH}")
+                    if re.search(re_zh_exp, name_zh) and len(name_zh) > 0:
+                        if fuzz.ratio(name_zh, nameZH) > 20:
+                            match_name_zh_list.append(name_zh)
+                            
+                if match_name_en_list or match_name_zh_list:
+                    cartesian_product.append((history, changelog))
+                
     cartesian_product.sort(key=lambda x: x[0]['_id'])
     grouped = {}
     for history, changelog in cartesian_product:
