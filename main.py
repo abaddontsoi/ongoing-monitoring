@@ -8,55 +8,71 @@ from utilities.adverse_media_search import get_adverse_media
 from datetime import datetime
 from utilities.load_template import load_ongoing_template   
 from utilities.judgment import get_judgments
+from rapidfuzz import fuzz
 
-async def handle_history(media_collection, judgment_collection, changelogs_collection, history: dict):
+
+async def cross_search_history_changelogs(history_data: list[dict], changelog_data: list[dict]) -> list[dict]:
+    results = []
+
+    similarity_cartesian_product = []
+    for changelog in changelog_data:
+        # Search whether changelog's target is in history_data
+        target = changelog["new_data"].get("target", [])
+        if isinstance(target, list) and len(target) > 0:
+            target_en = target[0].get("name_en", "").lower()
+            target_zh = target[0].get("name_zh", "")
+            target_en_zh = target_en + " " + target_zh
+            # Calculate and store the similarity between changelog's target and history_data's nameEN, nameZH, nameEN + nameZH
+            for history in history_data:
+                should_append = True
+                nameEN, nameZH = history.get("nameEN", "").lower(), history.get("nameZH", "").lower()
+                similarity_en = fuzz.ratio(target_en, nameEN)
+                should_append = should_append and similarity_en >= 0.2
+                similarity_zh = fuzz.ratio(target_zh, nameZH)
+                should_append = should_append and similarity_zh >= 0.2
+                similarity_en_zh = fuzz.ratio(target_en_zh, nameEN + " " + nameZH)
+                should_append = should_append and similarity_en_zh >= 0.2
+                
+                if should_append:
+                    similarity_cartesian_product.append((history, changelog, max(similarity_en, similarity_zh, similarity_en_zh)))
+                    
+
+    # Sort similarity_cartesian_product by history's _id
+    similarity_cartesian_product.sort(key=lambda x: x[0]["_id"], reverse=True)
     
-    # Load ongoing template
-    result = await load_ongoing_template()
-    result["aml_history_id"] = history["_id"]
-    result["searchBy"] = history["searchBy"]
-    result["status"] = "todo"
-    result["createdAt"] = datetime.now()
-    result["updatedAt"] = datetime.now()
-    result["data"] = []
-    
-    
-    search_adverse_media_zh = await get_adverse_media(media_collection, history.get("nameZH", None))
-    search_adverse_media_en = await get_adverse_media(media_collection, history.get("nameEN", None))
-    
-    search_judgment_zh = await get_judgments(judgment_collection, history.get("nameZH", None))
-    search_judgment_en = await get_judgments(judgment_collection, history.get("nameEN", None))
-    
-    search_results = []
-    search_results.extend(search_adverse_media_zh)
-    search_results.extend(search_adverse_media_en)
-    search_results.extend(search_judgment_zh)
-    search_results.extend(search_judgment_en)
-    
-    changelog_data = []
-    changelog_ids = []
-    for search_result in search_results:
-        logs = changelogs_collection.find({"$or": [
-            {"original_data_id": search_result["_id"]},
-            {"new_data": {k: v for k, v in search_result.items() if k != '_id'}},
-        ]})
-        for log in logs:
-            data = {
-                "sourcedata_changelogs_id": log["_id"],
-                "data_id": log["original_data_id"],
-                "category": log["category"],
-                "type": log["action"],
+    # Group by history's _id
+    grouped_similarity_cartesian_product = {}
+    for history, changelog, similarity in similarity_cartesian_product:
+        if history["_id"] not in grouped_similarity_cartesian_product:
+            grouped_similarity_cartesian_product[history["_id"]] = {
+                "searchBy": history['searchBy'],
+                "changelogs": []
             }
-            if log["action"] == "MOD":
-                data["changes"] = log["changes"]
-            elif log["action"] == "ADD":
-                data["new_data"] = log["new_data"]
-            
-            changelog_data.append(data)
-            changelog_ids.append(log["_id"])
-            
-    result["data"] = changelog_data
-    return result, changelog_ids
+        grouped_similarity_cartesian_product[history["_id"]]["changelogs"].append(changelog)
+        
+    for k, v in grouped_similarity_cartesian_product.items():
+        changelogs = []
+        for changelog in v["changelogs"]:
+            log = {}
+            log["sourcedata_changelogs_id"] = changelog["_id"]
+            log['data_id'] = changelog['original_data_id']
+            log['type'] = changelog['action']
+            log['category'] = changelog['category']
+            log['changes'] = changelog['changes']
+            log['createdAt'] = datetime.now()
+            log['updatedAt'] = datetime.now()
+            changelogs.append(log)
+        
+        result = await load_ongoing_template()
+        result["aml_history_id"] = k
+        result["searchBy"] = v["searchBy"]
+        result["status"] = "todo"
+        result["createdAt"] = datetime.now()
+        result["updatedAt"] = datetime.now()
+        result["data"] = changelogs
+        results.append(result)
+
+    return results
 
 async def main():
     load_dotenv()
@@ -76,31 +92,14 @@ async def main():
     
     # Get data from AML_history by filter ongoing_monitoring = true
     history_data = await fetch(client, test_db_name, history_collection_name, {"ongoing_monitoring": True})
-    tasks = []
-    for history in history_data:
-        nameEN, nameZH = history.get("nameEN"), history.get("nameZH")
-        names = []
-        if nameEN:  
-            names.append(nameEN)
-        if nameZH:
-            names.append(nameZH)
-        print(f"Searching for {names}")
-        tasks.append(handle_history(client[source_db_name][media_collection_name], 
-                                    client[source_db_name][judgment_collection_name],
-                                    client[source_db_name][sourcedata_changelogs_collection_name],
-                                    history))
-        
-    results = await asyncio.gather(*tasks)
-    status_update_lists = [result[1] for result in results if result[0]['data']]
-    status_update_ids = [item for sublist in status_update_lists for item in sublist]
     
-    # Update status of changelogs to pending
-    await client[source_db_name][sourcedata_changelogs_collection_name].update_many({"_id": {"$in": status_update_ids}}, {"$set": {"status": "completed"}})
+    # Get changelogs by filter status = pending
+    changelog_data = await fetch(client, source_db_name, sourcedata_changelogs_collection_name, {"status": "pending"})
     
-    # Create ongoing monitoring record 
-    for result in results:
-        if result[0]['data']:
-            await client[test_db_name][aml_ongoing_monitoring_collection_name].insert_one(result[0])
+    # Result of cross search
+    aml_ongoing_monitoring_data = await cross_search_history_changelogs(history_data, changelog_data)
+    
+    await client[test_db_name][aml_ongoing_monitoring_collection_name].insert_many(aml_ongoing_monitoring_data)
     
     # Close connection
     await client.close()
