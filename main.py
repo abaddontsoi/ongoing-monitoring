@@ -9,97 +9,77 @@ from datetime import datetime
 from utilities.load_template import load_ongoing_template   
 from utilities.judgment import get_judgments
 from rapidfuzz import fuzz
+import re
 
 
 async def cross_search_history_changelogs(history_data: list[dict], changelog_data: list[dict]) -> list[dict]:
     results = []
-
-    similarity_cartesian_product = []
-    for changelog in changelog_data:
-        # Search whether changelog's target is in history_data
-        target = changelog["new_data"].get("target", [])
-        if isinstance(target, list) and len(target) > 0:
-            # Calculate and store the similarity between changelog's target and history_data's nameEN, nameZH, nameEN + nameZH
-            for history in history_data:
-                target_en_list = [item.get("name_en", "").lower() for item in target]
-                target_zh_list = [item.get("name_zh", "") for item in target]
-                target_en_zh_list = [item.get("name_en", "") + " " + item.get("name_zh", "") for item in target]
-                
-                should_append = True
-                nameEN, nameZH = history.get("nameEN", "").lower(), history.get("nameZH", "")
-                
-                # Check English name similarity
-                if nameEN:
-                    for target_en in target_en_list:
-                        similarity_en = fuzz.ratio(target_en, nameEN)
-                        if similarity_en >= 80:
-                            should_append = True
-                            break
-                        should_append = False
-                
-                # If English name doesn't match, check Chinese name similarity
-                if not should_append and nameZH:
-                    for target_zh in target_zh_list:
-                        similarity_zh = fuzz.ratio(target_zh, nameZH) 
-                        if similarity_zh >= 80:
-                            should_append = True
-                            break
-                        should_append = False
-                
-                # Check combined name similarity if individual matches failed
-                if not should_append:
-                    for target_en_zh in target_en_zh_list:
-                        similarity_en_zh = fuzz.ratio(target_en_zh, nameEN + " " + nameZH)
-                        if similarity_en_zh >= 80:
-                            should_append = True
-                            break
-                        should_append = False
-                
-                if should_append:
-                    similarity_cartesian_product.append((history, changelog))
-                    
-
-    # Sort similarity_cartesian_product by history's _id
-    similarity_cartesian_product.sort(key=lambda x: x[0]["_id"], reverse=True)
     
-    # Group by history's _id
-    grouped_similarity_cartesian_product = {}
-    for history, changelog in similarity_cartesian_product:
-        if history["_id"] not in grouped_similarity_cartesian_product:
-            grouped_similarity_cartesian_product[history["_id"]] = {
-                "searchBy": history['searchBy'],
-                "changelogs": []
+    cartesian_product = []
+    for history in history_data: 
+        nameEN = history.get("nameEN", "").lower()
+        nameZH = history.get("nameZH", "")
+        for changelog in changelog_data:
+            if isinstance(changelog.get("new_data", {}).get("target"), list):
+                name_en_list = [item.get("name_en", "").lower() for item in changelog.get("new_data", {}).get("target", [])]
+                name_zh_list = [item.get("name_zh", "") for item in changelog.get("new_data", {}).get("target", [])]
+                match_name_en_list = []
+                match_name_zh_list = []
+                re_en_exp = re.compile(f".*{nameEN}.*")
+                re_zh_exp = re.compile(f".*{nameZH}.*")
+                for name_en in name_en_list:
+                    print(f"Comparing {name_en} with {nameEN}")
+                    if re.search(re_en_exp, name_en) and len(name_en) > 0:
+                        if fuzz.ratio(name_en, nameEN) > 20:
+                            match_name_en_list.append(name_en)
+                        
+                for name_zh in name_zh_list:
+                    print(f"Comparing {name_zh} with {nameZH}")
+                    if re.search(re_zh_exp, name_zh) and len(name_zh) > 0:
+                        if fuzz.ratio(name_zh, nameZH) > 20:
+                            match_name_zh_list.append(name_zh)
+                            
+                if match_name_en_list or match_name_zh_list:
+                    cartesian_product.append((history, changelog))
+    
+    cartesian_product.sort(key=lambda x: x[0]['_id'])
+    grouped = {}
+    for history, changelog in cartesian_product:
+        if history['_id'] not in grouped:
+            grouped[history['_id']] = {
+                'searchBy': history['searchBy'],
+                'changelogs': []
             }
-        grouped_similarity_cartesian_product[history["_id"]]["changelogs"].append(changelog)
-        
-    for k, v in grouped_similarity_cartesian_product.items():
-        changelogs = []
-        for changelog in v["changelogs"]:
-            log = {}
-            log["sourcedata_changelogs_id"] = changelog["_id"]
-            log['data_id'] = changelog['original_data_id']
-            log['type'] = changelog['action']
-            log['category'] = changelog['category']
-            if changelog['action'] == 'ADD':
-                log['new_data'] = changelog['new_data']
-            elif changelog['action'] == 'MOD':
-                log['new_data'] = changelog['new_data']
-                if changelog['changes']:
-                    log['changes'] = changelog['changes']
-                    
-            log['createdAt'] = datetime.now()
-            log['updatedAt'] = datetime.now()
-            changelogs.append(log)
+        grouped[history['_id']]['changelogs'].append(changelog)
+
+    for history_id, data in grouped.items():
+        formatted = []
+        changelogs = data['changelogs']
+        for changelog in changelogs:
+            new_data = {
+                "sourcedata_changelogs_id": changelog['_id'],
+                "data_id": changelog['original_data_id'],
+                'type': changelog['action'],
+                "category": changelog['category'],
+                "createdAt": datetime.now(),
+                "updatedAt": datetime.now(),
+                "new_data": changelog['new_data'],
+                "old_data": changelog['old_data']
+            }
+                
+            if changelog['action'] == 'MOD':
+                new_data['changes'] = changelog['changes']
+            
+            formatted.append(new_data)
         
         result = await load_ongoing_template()
-        result["aml_history_id"] = k
-        result["searchBy"] = v["searchBy"]
-        result["status"] = "todo"
-        result["createdAt"] = datetime.now()
-        result["updatedAt"] = datetime.now()
-        result["data"] = changelogs
+        result['aml_history_id'] = history_id
+        result['searchBy'] = data['searchBy']
+        result['data'] = formatted
+        result['createdAt'] = datetime.now()
+        result['updatedAt'] = datetime.now()
         results.append(result)
-
+        
     return results
 
 async def main():
