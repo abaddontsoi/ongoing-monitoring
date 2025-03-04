@@ -12,7 +12,7 @@ from rapidfuzz import fuzz
 import re
 
 
-async def cross_search_history_changelogs(history_data: list[dict], changelog_data: list[dict]) -> list[dict]:
+async def cross_search_history_changelogs(history_data: list[dict], changelog_data: list[dict]) -> tuple[list[dict], list]:
     results = []
     
     cartesian_product = []
@@ -80,7 +80,7 @@ async def cross_search_history_changelogs(history_data: list[dict], changelog_da
         result['updatedAt'] = datetime.now()
         results.append(result)
         
-    return results
+    return results, [product[1] for product in cartesian_product]
 
 async def main():
     load_dotenv()
@@ -105,9 +105,15 @@ async def main():
     changelog_data = await fetch(client, source_db_name, sourcedata_changelogs_collection_name, {"status": "pending"})
     
     # Result of cross search
-    aml_ongoing_monitoring_data = await cross_search_history_changelogs(history_data, changelog_data)
+    aml_ongoing_monitoring_data, cartesian_product = await cross_search_history_changelogs(history_data, changelog_data)
     
     await client[test_db_name][aml_ongoing_monitoring_collection_name].insert_many(aml_ongoing_monitoring_data)
+    
+    # Update changelog status to completed
+    await client[source_db_name][sourcedata_changelogs_collection_name].update_many(
+        {"_id": {"$in": [product['_id'] for product in cartesian_product]}},
+        {"$set": {"status": "completed"}}
+    )
     
     # Close connection
     await client.close()
