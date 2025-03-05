@@ -94,7 +94,7 @@ async def cross_search_history_changelogs(history_data: list[dict], changelog_da
         for changelog in changelogs:
             new_data = {
                 "sourcedata_changelogs_id": changelog['_id'],
-                "data_id": changelog.get("original_data_id", ""),
+                "data_id": changelog.get("original_data_id") or str(changelog.get("new_data", {}).get("_id")) if changelog.get("new_data", {}).get("_id") else None,
                 'type': changelog['action'],
                 "category": changelog['category'],
                 "createdAt": datetime.now(),
