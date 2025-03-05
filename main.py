@@ -1,13 +1,10 @@
 import asyncio
-from bson import ObjectId
 from dotenv import load_dotenv
 from pymongo import AsyncMongoClient
 import os
 from utilities.fetch import fetch
-from utilities.adverse_media_search import get_adverse_media
 from datetime import datetime
 from utilities.load_template import load_ongoing_template   
-from utilities.judgment import get_judgments
 from rapidfuzz import fuzz
 import re
 
@@ -68,7 +65,18 @@ async def cross_search_history_changelogs(history_data: list[dict], changelog_da
                         cartesian_product.append((history, changelog))
                         
             elif changelog.get("category") == "judgment":
-                ...
+                if isinstance(changelog.get("new_data"), dict):
+                    title = changelog.get("new_data").get("title").lower()
+                    if title:
+                        re_en_exp = re.compile(f".*{nameEN}.*")
+                        re_zh_exp = re.compile(f".*{nameZH}.*")
+                        if re.search(re_en_exp, title) and len(title) > 0 and len(nameEN) > 0:
+                            if fuzz.ratio(title, nameEN) > 20 or fuzz.ratio(title, nameZH) > 20:
+                                cartesian_product.append((history, changelog))
+                        elif re.search(re_zh_exp, title) and len(title) > 0 and len(nameZH) > 0:
+                            if fuzz.ratio(title, nameZH) > 20:
+                                cartesian_product.append((history, changelog))
+
                 
     cartesian_product.sort(key=lambda x: x[0]['_id'])
     grouped = {}
@@ -86,7 +94,7 @@ async def cross_search_history_changelogs(history_data: list[dict], changelog_da
         for changelog in changelogs:
             new_data = {
                 "sourcedata_changelogs_id": changelog['_id'],
-                "data_id": changelog['original_data_id'],
+                "data_id": changelog.get("original_data_id", ""),
                 'type': changelog['action'],
                 "category": changelog['category'],
                 "createdAt": datetime.now(),
@@ -135,13 +143,15 @@ async def main():
     # Result of cross search
     aml_ongoing_monitoring_data, cartesian_product = await cross_search_history_changelogs(history_data, changelog_data)
     
-    await client[test_db_name][aml_ongoing_monitoring_collection_name].insert_many(aml_ongoing_monitoring_data)
+    if aml_ongoing_monitoring_data:
+        await client[test_db_name][aml_ongoing_monitoring_collection_name].insert_many(aml_ongoing_monitoring_data)
     
-    # Update changelog status to completed
-    await client[source_db_name][sourcedata_changelogs_collection_name].update_many(
-        {"_id": {"$in": [product['_id'] for product in cartesian_product]}},
-        {"$set": {"status": "completed"}}
-    )
+    if cartesian_product:
+        # Update changelog status to completed
+        await client[source_db_name][sourcedata_changelogs_collection_name].update_many(
+            {"_id": {"$in": [product['_id'] for product in cartesian_product]}},
+            {"$set": {"status": "completed"}}
+        )
     
     # Close connection
     await client.close()
