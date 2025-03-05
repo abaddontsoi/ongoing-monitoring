@@ -16,6 +16,7 @@ async def find_history_result_by_data_id(history_results: list[dict], data_id: s
 
 async def handle_group(collection, group: dict):
     history_result_tasks = []
+    finished_ongoing_ids = []
     for history_id, data in group.items():
         ongoings = data.get("ongoing")
         history_results = data.get("history_result")
@@ -48,9 +49,11 @@ async def handle_group(collection, group: dict):
                                 "updatedAt": datetime.now()
                             }
                         ))
-                        
+        
+        finished_ongoing_ids.extend([ongoing.get("_id") for ongoing in ongoings])
+    
     await asyncio.gather(*history_result_tasks)
-    return [ongoing.get("_id") for ongoing in ongoings]
+    return finished_ongoing_ids
 
 async def main():
     load_dotenv()
