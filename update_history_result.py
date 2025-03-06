@@ -29,22 +29,52 @@ async def handle_group(collection, group: dict):
                 history_result = await find_history_result_by_data_id(history_results, changelog.get("data_id"))
                 if history_result:
                     if changelog.get("type") == "MOD":
+                                                
+                        formatted_new_data = {
+                            "title": changelog.get("new_data", {}).get("headline", {}).get("en", ""),
+                            "link": changelog.get("new_data", {}).get("urls", [{}])[0],
+                            "subtitle": changelog.get("new_data", {}).get("headline", {}).get("en", ""),
+                            "description": changelog.get("new_data", {}).get("content", {}).get("en", ""),
+                        }
+
                         history_result_tasks.append(collection.update_one(
                             {"_id": history_result.get("_id")},
                             {"$set": {
-                                "result": changelog.get("new_data"),
+                                "result": formatted_new_data,
                                 "updatedAt": datetime.now()
                             }}
                         ))
                 else:
                     if changelog.get("type") == "ADD":
+                        # New format
+                        # _id: item._id,
+                        # title: item.headline?.en,
+                        # link: item.urls[0],
+                        # subtitle: subtitle,
+                        # description: item.content?.en,
+                        type_mapping = {
+                            "adverse media": "News",
+                            "judgment": "Judgment",
+                        }
+                        category_mapping = {
+                            "adverse media": "AdverseMedia",
+                            "judgment": "Judgment",
+                        }
+                        
+                        formatted_new_data = {
+                            "title": changelog.get("new_data", {}).get("headline", {}).get("en", ""),
+                            "link": changelog.get("new_data", {}).get("urls", [{}])[0],
+                            "subtitle": changelog.get("new_data", {}).get("headline", {}).get("en", ""),
+                            "description": changelog.get("new_data", {}).get("content", {}).get("en", ""),
+                        }
+
                         history_result_tasks.append(collection.insert_one(
                             {
                                 "aml_history_id": history_id,
-                                "type": changelog.get("category"),
-                                "category": changelog.get("category"),
-                                "data_id": str(changelog.get("data_id")),
-                                "result": changelog.get("new_data"),
+                                "type": type_mapping.get(changelog.get("category")),
+                                "category": category_mapping.get(changelog.get("category")),
+                                "data_id": str(changelog.get("data_id")) if changelog.get("data_id") else None,
+                                "result": formatted_new_data,
                                 "createdAt": datetime.now(),
                                 "updatedAt": datetime.now()
                             }
@@ -106,7 +136,12 @@ async def main():
     finished_ongoing_ids = await handle_group(client[test_db_name][history_result_collection_name], grouped)
     await client[test_db_name][aml_ongoing_monitoring_collection_name].update_many(
         {"_id": {"$in": finished_ongoing_ids}},
-        {"$set": {"status": "done"}}
+        {
+            "$set": {
+                "status": "done",
+                "updatedAt": datetime.now()
+            }
+        }
     )
 
     
